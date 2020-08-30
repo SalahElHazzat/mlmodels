@@ -182,5 +182,167 @@ def test_functions_json(arg=None):
      except Exception as e:
         log(e, p )    
 
+import json
+import os
+import pandas as pd
+import time
+
+'''
+    For the given path, get the List of all files in the directory tree
+    Here the Path is where the json directory exist "mlmodels/mlmodels/dataset"
+    Please change path by using os.chdir(***json directory Path***)
+    
+'''
+def getListOfJsonsPaths(dirName):
+    # create a list of file and sub directories 
+    # names in the given directory 
+    listOfFile = os.listdir(dirName)
+    allFiles = list()
+    # Iterate over all the entries
+    for entry in listOfFile:
+        # Create full path
+        fullPath = os.path.join(dirName, entry)
+        # If entry is a directory then get the list of files in this directory 
+        if os.path.isdir(fullPath):
+            allFiles = allFiles + getListOfJsonsPaths(fullPath)
+        else:
+            allFiles.append(fullPath)
+
+    return allFiles
 
 
+
+'''
+    This function takes as a parameter list of json paths => result of getListOfFiles()
+    Detects unreadable json files and,
+    Returns a list of Python dictionaries of the jsons, containing two keys
+    'Path' key, containing path to the json and 'json' key containing the dictionary
+
+'''
+def Jsons_ToDictionaries(json_Paths):
+    data=[]
+    problem=0
+    for i in range(len(json_Paths)):
+        try:
+            with open(json_Paths[i]) as json_file:
+                d=dict()
+                d['Path']=json_Paths[i]
+                d['Json']=json.load(json_file)
+                data.append(d)
+        except:
+            if(problem==0):
+                print("Files That have a structure problem:\n")
+            problem+=1
+            print('\t',json_Paths[i])
+            continue
+    print("Total flawed jsons:\t",problem)
+    return data
+
+
+
+'''
+    This function takes as a parameter the result of JsonsToDictionaries,
+    which is a list of dictionaries with 'Path' and 'Json' keys
+    Returns the list of dictionaries 
+    
+'''
+def IndexedDicts_ToDicts(indexed_Dicts):
+    Dicts=[]
+    for i in range(len(indexed_Dicts)):
+        Dicts.append(indexed_Dicts[i]['Json'])
+    return Dicts
+
+
+
+'''
+    This function takes as a parameter the result of JsonsToDictionaries,
+    which is a list of dictionaries with 'Path' and 'Json' keys
+    Returns a dataframe of the jsons with a 'Path' column that contains json paths
+'''
+def IndexedDicts_ToDF(indexed_Dicts):
+    all_jsons = IndexedDicts_ToDicts(indexed_Dicts)
+    paths=[]
+    filenames=[]
+    for i in range(len(indexed_Dicts)):
+        paths.append(indexed_Dicts[i]['Path'])
+    for i in range(len(indexed_Dicts)):
+        filename=indexed_Dicts[i]['Path'].split('\\')[-1].split('.json')[0]
+        filenames.append(filename)
+    
+    df = pd.json_normalize(all_jsons)
+    df1 = pd.DataFrame({'file_path':paths,'json_name':filenames})
+    result = pd.concat([df1, df], axis=1)
+    print("Dataframe created successfully")
+    return result
+
+'''Get json skeleton from csv'''
+
+def JsSkeleton_Fromcsv(csv):
+    df=pd.read_csv(csv)
+    d=dict()
+    fullname=list(df.columns)[3:]
+    for j in range(len(fullname)):
+        l=fullname[j].split('.')
+        d=Update_Dict(l,d,None)
+    return d
+
+''' Update dictionary, fields_list is result of .split('.')'''
+def Update_Dict(Fields_list,Dict,value):
+    if(len(Fields_list)>1):
+        l1=Fields_list[1:]
+        k=Fields_list[0]
+        if(k not in list(Dict.keys())):
+            Dict[k]=dict()
+        Dict[k]=Update_Dict(l1,Dict[k],value)
+    else:
+        k=Fields_list[0]
+        Dict[k]=value
+        return Dict
+    return Dict
+
+'''transform csv to list of dicts and create new normalized jsons'''
+def csv_toJsons(csv):
+    dicts=[]
+    df=pd.read_csv(csv)
+    fullname=list(df.columns)[3:]
+    filename=list(df['json_name'])
+    for i in range(len(filename)):
+        dd=JsSkeleton_Fromcsv(csv)
+        for j in  range(len(fullname)):
+            value=df.iloc[i][fullname[j]]
+            fields=fullname[j].split('.')
+            dd.update(Update_Dict(fields,dd,value).copy())
+        dicts.append(dd)
+    paths=list(df['file_path'])
+    paths_tocreate=[]
+    for i in range(len(paths)):
+        lp=paths[i].split('\\')
+        dire=""
+        if(len(lp)>2):
+            for j in  range(1,len(lp)-1):
+                dire=dire+'\\'+lp[j]
+        paths_tocreate.append(dire)
+    paths_tocreate1=list(set(paths_tocreate))
+    paths_tocreate1.sort()
+    print("Now creating normalized jsons directory")
+    for p in paths_tocreate1:
+        try:
+            os.mkdir('normalized_jsons'+p)
+        except OSError:
+            print ("Creation of the directory %s failed\t",p)
+    
+    for i in range(len(filename)):
+        with open('normalized_jsons\\'+paths_tocreate[i]+'\\'+filename[i]+'.json', 'w') as fp:
+            json.dump(dicts[i], fp, indent = 4)
+    print("New normalized jsons created")
+    return dicts
+
+#######functions testing part#######
+JsonsPaths=getListOfJsonsPaths('json')
+Indexed_Dictionaries=Jsons_ToDictionaries(JsonsPaths)
+Dictionaries=IndexedDicts_ToDicts(Indexed_Dictionaries)
+Df=IndexedDicts_ToDF(Indexed_Dictionaries)
+Df.to_csv('data.csv')
+print('csv created successfully')
+time.sleep(1)
+New_dicts=csv_toJsons('data.csv')
